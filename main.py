@@ -12,6 +12,19 @@ GRAPH_VERSION = os.getenv("META_GRAPH_VERSION", "v27.0")
 GRAPH_BASE = f"https://graph.facebook.com/{GRAPH_VERSION}"
 
 
+def extract_owner_info(me_payload: object) -> dict:
+    """Safely extract id & name from /me whether Meta returns a dict, wrapped dict, or list."""
+    if isinstance(me_payload, list):
+        first = me_payload[0] if me_payload and isinstance(me_payload[0], dict) else {}
+        return {"id": first.get("id"), "name": first.get("name")}
+    if isinstance(me_payload, dict):
+        if isinstance(me_payload.get("data"), list) and me_payload["data"]:
+            first = me_payload["data"][0] if isinstance(me_payload["data"][0], dict) else {}
+            return {"id": first.get("id"), "name": first.get("name")}
+        return {"id": me_payload.get("id"), "name": me_payload.get("name")}
+    return {"id": None, "name": None}
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
@@ -85,7 +98,8 @@ async def meta_oauth_callback(
                 "access_token": access_token,
             },
         )
-        me_data = me_resp.json() if me_resp.status_code == 200 else {}
+        me_payload = me_resp.json() if me_resp.status_code == 200 else {}
+        account_owner = extract_owner_info(me_payload)
 
         # Step 4: Fetch assigned Instagram accounts (with pagination support)
         ig_accounts = []
@@ -108,15 +122,12 @@ async def meta_oauth_callback(
             next_url = ig_data.get("paging", {}).get("next")
             next_params = None  # `next` URL already includes query parameters
 
-        # TODO: Persist `access_token`, `me_data`, and `ig_accounts` in your database
+        # TODO: Persist `access_token`, `account_owner`, and `ig_accounts` in your database
         return {
             "status": "success",
             "access_token": access_token,
             "expires_in_seconds": expires_in,
-            "account_owner": {
-                "id": me_data.get("id"),
-                "name": me_data.get("name"),
-            },
+            "account_owner": account_owner,
             "instagram_accounts": [
                 {
                     "ig_user_id": acc.get("id"),
